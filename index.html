@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#2563eb">
+<meta name="format-detection" content="telephone=no">
+<title>图书管理系统</title>
+<script src="/lib/tailwind.js"></script>
+<script src="/lib/xlsx.full.min.js"></script>
+<script src="/lib/html5-qrcode.min.js"></script>
+<script>
+  tailwind.config = { theme: { extend: { screens: { 'xs': '380px' } } } }
+</script>
+<style>
+  * { -webkit-tap-highlight-color: transparent; }
+  html, body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; touch-action: manipulation; overscroll-behavior-y: contain; }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+  .scan-input:focus { outline: 2px solid #3b82f6; outline-offset: 2px; }
+  .book-row:hover { background-color: #f8fafc; }
+  .modal-backdrop { background: rgba(0,0,0,0.55); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); }
+  #reader { width: 100%; margin: 0 auto; }
+  #reader video { border-radius: 12px !important; object-fit: cover; }
+  #reader__scan_region { background: transparent !important; }
+  #reader__dashboard_section_csr button { padding: 10px 16px !important; border-radius: 10px !important; font-size: 14px !important; margin: 6px 4px !important; }
+  .quantity-btn { min-width: 40px; height: 40px; }
+  .touch-btn { min-height: 44px; }
+  .touch-input { min-height: 44px; }
+  @keyframes flash { 0%, 100% { background-color: transparent; } 50% { background-color: #bbf7d0; } }
+  .flash-row { animation: flash 0.6s ease-in-out; }
+  @keyframes pulse-ring { 0% { transform: scale(0.9); opacity: 0.8; } 100% { transform: scale(1.4); opacity: 0; } }
+  .pulse-ring::before { content:''; position:absolute; inset:0; border:2px solid #8b5cf6; border-radius:inherit; animation: pulse-ring 1.4s cubic-bezier(0.215,0.61,0.355,1) infinite; }
+  input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { opacity: 1; height: 40px; }
+  @media (max-width: 767px) {
+    .mobile-full-modal > div { max-width: 100% !important; margin: 0 !important; border-radius: 0 !important; }
+    .mobile-full-modal > div { height: 100% !important; max-height: 100% !important; }
+    .mobile-full-modal { align-items: stretch !important; }
+    .mobile-full-modal > div { flex-direction: column; display: flex; }
+    .mobile-card { border-bottom: none; }
+  }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<div class="max-w-7xl mx-auto px-3 sm:px-4 py-4 sm:py-6 pb-28 sm:pb-6">
+  <header class="mb-5">
+    <h1 class="text-2xl sm:text-3xl font-bold text-gray-800 flex items-center gap-2 sm:gap-3">
+      <svg class="w-8 h-8 sm:w-9 sm:h-9 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+      <span id="pageTitle">图书管理系统</span>
+    </h1>
+    <p class="text-gray-500 mt-1 text-xs sm:text-sm">扫码枪 / 手机扫码 · Excel 导入导出 · 库存管理</p>
+  </header>
+
+  <!-- 文件夹视图：仅在主页显示 -->
+  <div id="folderView" class="bg-white rounded-2xl shadow-sm p-4 sm:p-5 mb-5">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-base sm:text-lg font-bold text-gray-700">📚 书籍分类文件夹</h2>
+      <span class="text-xs text-gray-500">共 4 个分类</span>
+    </div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="folderCards"></div>
+  </div>
+
+  <!-- 文件夹视图头部：仅在文件夹视图中显示 -->
+  <div id="folderHeader" class="hidden bg-white rounded-2xl shadow-sm p-4 sm:p-5 mb-5">
+    <div class="flex items-center gap-3">
+      <button onclick="closeFolder()" class="px-3 py-2 touch-btn bg-gray-100 active:bg-gray-200 text-gray-700 rounded-xl font-medium text-sm flex items-center gap-1.5 shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        <span>返回</span>
+      </button>
+      <div id="folderTitle" class="flex-1 min-w-0"></div>
+    </div>
+  </div>
+
+
+  <div class="bg-white rounded-2xl shadow-sm p-4 sm:p-5 mb-5">
+    <div class="grid md:grid-cols-2 gap-3 sm:gap-4 mb-4">
+      <div>
+        <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5">扫码 / 输入条形码</label>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input id="barcodeInput" type="text" inputmode="numeric" placeholder="扫码枪直接扫描或手动输入..."
+            class="scan-input flex-1 px-3 sm:px-4 py-3 touch-input border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" autocomplete="off">
+          <div class="flex gap-2 shrink-0">
+            <button onclick="processBarcode()" class="flex-1 sm:flex-none px-4 py-3 touch-btn bg-blue-600 active:bg-blue-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm sm:text-base">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+              <span class="sm:hidden">处理</span><span class="hidden sm:inline">扫码处理</span>
+            </button>
+            <button onclick="openCameraScanner()" class="flex-1 sm:flex-none px-4 py-3 touch-btn bg-purple-600 active:bg-purple-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm sm:text-base">
+              <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+              <span>手机扫码</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      <div class="flex-1">
+        <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5">搜索图书（书名 / 条形码）</label>
+        <div class="flex gap-2">
+          <input id="searchInput" type="text" oninput="renderBooks()" placeholder="输入书名或条形码搜索..."
+            class="flex-1 px-3 sm:px-4 py-3 touch-input border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition">
+          <button onclick="document.getElementById('searchInput').value=''; renderBooks();" class="px-4 py-3 touch-btn bg-gray-500 active:bg-gray-700 text-white rounded-xl font-medium shrink-0">清空</button>
+        </div>
+      </div>
+      <div class="w-full sm:w-56">
+        <label class="block text-xs sm:text-sm font-medium text-gray-700 mb-1.5">按分类筛选</label>
+        <select id="categoryFilter" onchange="renderBooks()" class="w-full px-3 sm:px-4 py-3 touch-input border border-gray-300 rounded-xl text-base focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition bg-white">
+          <option value="">全部分类</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 xs:grid-cols-4 md:flex md:flex-wrap gap-2 md:gap-3">
+      <button onclick="openAddModal()" class="col-span-2 xs:col-span-1 px-3 py-3 touch-btn bg-green-600 active:bg-green-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>新增图书
+      </button>
+      <label class="col-span-2 xs:col-span-1 px-3 py-3 touch-btn bg-amber-600 active:bg-amber-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 cursor-pointer text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>导入Excel
+        <input type="file" accept=".xlsx,.xls,.csv" onchange="importExcel(event)" class="hidden">
+      </label>
+      <button onclick="exportExcel()" class="px-3 py-3 touch-btn bg-teal-600 active:bg-teal-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>导出
+      </button>
+      <button onclick="downloadTemplate()" class="px-3 py-3 touch-btn bg-slate-600 active:bg-slate-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>模板
+      </button>
+      <button onclick="openLogModal()" class="px-3 py-3 touch-btn bg-indigo-600 active:bg-indigo-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>记录
+      </button>
+      <button onclick="backupToServer(true)" class="px-3 py-3 touch-btn bg-rose-600 active:bg-rose-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg>备份PDF
+      </button>
+      <button id="autoScanBtn" onclick="toggleAutoScan()" class="px-3 py-3 touch-btn bg-gray-400 active:bg-gray-600 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm">
+        <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg><span id="autoScanLabel">自动录入</span>
+      </button>
+    </div>
+
+    <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-xs sm:text-sm text-gray-600">
+      <div class="flex items-center gap-3 sm:gap-6">
+        <span>共 <strong id="totalCount" class="text-base sm:text-lg text-blue-600">0</strong> 本</span>
+        <span>合计 <strong id="totalQty" class="text-base sm:text-lg text-green-600">0</strong> 条记录</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="bg-white rounded-2xl shadow-sm overflow-hidden hidden sm:block">
+    <div class="overflow-x-auto">
+      <table class="w-full">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase w-16">序号</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase w-16">标签</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">条形码</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">书名</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">作者</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">出版社</th>
+            <th id="folderColHeader" class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase hidden">文件夹</th>
+            <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600 uppercase">分类</th>
+            <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600 uppercase">单价</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase w-20">库存量</th>
+            <th class="px-4 py-3 text-center text-xs font-semibold text-gray-600 uppercase w-40">操作</th>
+          </tr>
+        </thead>
+        <tbody id="bookListDesktop" class="divide-y divide-gray-100"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="bookListMobile" class="sm:hidden space-y-3"></div>
+
+  <div id="emptyState" class="hidden py-16 text-center text-gray-400">
+    <svg class="w-20 h-20 mx-auto mb-4 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+    <p class="text-lg">暂无图书数据</p>
+    <p class="text-sm mt-1">扫码录入、新增图书 或 从 Excel 导入开始使用</p>
+  </div>
+</div>
+
+<div class="sm:hidden fixed bottom-4 left-4 right-4 z-40 flex gap-2">
+  <button onclick="openCameraScanner()" class="flex-1 relative py-3.5 bg-purple-600 active:bg-purple-800 text-white rounded-2xl shadow-lg font-bold flex items-center justify-center gap-2 text-base pulse-ring overflow-hidden">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+    扫码
+  </button>
+  <button onclick="openAddModal()" class="px-5 py-3.5 bg-green-600 active:bg-green-800 text-white rounded-2xl shadow-lg font-bold flex items-center justify-center">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 4v16m8-8H4"></path></svg>
+  </button>
+  <button onclick="document.getElementById('barcodeInput').scrollIntoView({behavior:'smooth'}); setTimeout(()=>document.getElementById('barcodeInput').focus(),300);" class="px-5 py-3.5 bg-blue-600 active:bg-blue-800 text-white rounded-2xl shadow-lg font-bold flex items-center justify-center">
+    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"></path></svg>
+  </button>
+</div>
+
+<div id="bookModal" class="mobile-full-modal fixed inset-0 z-50 hidden items-center justify-center modal-backdrop">
+  <div class="bg-white sm:rounded-2xl shadow-2xl w-full max-w-lg sm:mx-4 h-full sm:h-auto sm:max-h-[90vh] overflow-y-auto flex flex-col">
+    <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+      <h3 id="modalTitle" class="text-xl font-bold text-gray-800">新增图书</h3>
+      <button onclick="closeBookModal()" class="w-10 h-10 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 active:bg-gray-200">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+    <div class="p-5 space-y-4 flex-1">
+      <input type="hidden" id="editId">
+      <div id="modalFolderHint" class="hidden px-3 py-2 rounded-lg bg-blue-50 text-blue-700 text-xs font-medium flex items-center gap-2"></div>
+      <div><label class="block text-sm font-medium text-gray-700 mb-1.5">条形码 <span class="text-red-500">*</span></label>
+        <input id="f_barcode" type="text" inputmode="numeric" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="例如：9787111213826"></div>
+      <div><label class="block text-sm font-medium text-gray-700 mb-1.5">书名 <span class="text-red-500">*</span></label>
+        <input id="f_title" type="text" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="例如：JavaScript高级程序设计"></div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="block text-sm font-medium text-gray-700 mb-1.5">作者</label>
+          <input id="f_author" type="text" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="作者名"></div>
+        <div><label class="block text-sm font-medium text-gray-700 mb-1.5">出版社</label>
+          <input id="f_publisher" type="text" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="出版社"></div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div><label class="block text-sm font-medium text-gray-700 mb-1.5">分类</label>
+          <input id="f_category" type="text" list="categoryList" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="选择或输入分类，如：计算机/编程">
+          <datalist id="categoryList"></datalist></div>
+        <div><label class="block text-sm font-medium text-gray-700 mb-1.5">单价（元）</label>
+          <input id="f_price" type="number" inputmode="decimal" step="0.01" min="0" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="0.00"></div>
+      </div>
+      <div><label class="block text-sm font-medium text-gray-700 mb-1.5">位置/书架</label>
+        <input id="f_location" type="text" class="w-full px-4 py-3 touch-input border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 text-base" placeholder="例如：A区-3层-5号"></div>
+    </div>
+    <div class="px-5 py-4 border-t border-gray-100 flex gap-3 sticky bottom-0 bg-white mt-auto sm:rounded-b-2xl">
+      <button onclick="closeBookModal()" class="flex-1 px-6 py-3 touch-btn bg-gray-100 active:bg-gray-200 text-gray-700 rounded-xl font-medium">取消</button>
+      <button onclick="saveBook()" class="flex-1 px-6 py-3 touch-btn bg-blue-600 active:bg-blue-800 text-white rounded-xl font-medium">保存</button>
+    </div>
+  </div>
+</div>
+
+<div id="scanModal" class="mobile-full-modal fixed inset-0 z-50 hidden items-center justify-center modal-backdrop">
+  <div class="bg-white sm:rounded-2xl shadow-2xl w-full max-w-md sm:mx-4 h-full sm:h-auto overflow-y-auto flex flex-col">
+    <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 bg-white z-10">
+      <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+        <svg class="w-6 h-6 text-blue-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z"></path></svg>
+        扫码录入
+      </h3>
+      <button onclick="closeScanModal()" class="w-10 h-10 flex items-center justify-center rounded-full text-gray-500 hover:bg-gray-100 active:bg-gray-200">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+    <div class="p-5 space-y-4 flex-1">
+      <div id="scanFolderHint" class="hidden px-3 py-2 rounded-lg bg-amber-50 text-amber-700 text-xs font-medium flex items-center gap-2"></div>
+      <div class="bg-blue-50 border border-blue-200 rounded-xl p-4">
+        <div class="text-sm text-blue-700 mb-1">扫描到的条形码：</div>
+        <div id="scanBarcode" class="text-2xl font-bold text-blue-900 break-all font-mono">-</div>
+      </div>
+      <div id="scanBookInfo" class="hidden bg-gray-50 border border-gray-200 rounded-xl p-4">
+        <div class="text-sm text-gray-500 mb-1">已收录书目：</div>
+        <div class="text-lg font-semibold text-gray-800" id="scanBookTitle">-</div>
+        <div class="text-sm text-gray-600 mt-2">已录入册数：<span id="scanCurrentQty" class="font-bold text-blue-600 text-lg">-</span> 本</div>
+      </div>
+      <div id="scanNewBookHint" class="hidden">
+        <div class="text-amber-700 text-sm bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <strong class="block mb-1">📖 该条形码尚未收录</strong>
+          点击下方按钮录入新书信息。
+        </div>
+      </div>
+      <div id="scanApiLoading" class="hidden flex items-center gap-2 text-sm text-gray-500 bg-gray-50 rounded-xl p-3">
+        <svg class="animate-spin w-5 h-5 text-blue-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+          正在联网查询图书信息...
+      </div>
+      <div id="scanApiResult" class="hidden bg-green-50 border border-green-200 rounded-xl p-4 space-y-2">
+        <div class="text-sm font-semibold text-green-700 flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
+          联网查询到图书信息
+        </div>
+        <div class="space-y-1 text-sm">
+          <div class="flex gap-2"><span class="text-gray-500 shrink-0">书名：</span><span id="apiTitle" class="font-medium text-gray-900"></span></div>
+          <div class="flex gap-2"><span class="text-gray-500 shrink-0">作者：</span><span id="apiAuthor" class="text-gray-700"></span></div>
+          <div class="flex gap-2"><span class="text-gray-500 shrink-0">出版社：</span><span id="apiPublisher" class="text-gray-700"></span></div>
+          <div class="flex gap-2" id="apiPriceRow"><span class="text-gray-500 shrink-0">定价：</span><span id="apiPrice" class="text-gray-700"></span></div>
+          <div class="flex gap-2" id="apiCategoryRow"><span class="text-gray-500 shrink-0">分类：</span><span id="apiCategory" class="text-gray-700"></span></div>
+        </div>
+      </div>
+      <div id="scanApiFail" class="hidden text-sm text-gray-400 bg-gray-50 rounded-xl p-3">
+        未查到图书信息，请手动录入
+      </div>
+    </div>
+    <div class="px-5 py-4 border-t border-gray-100 flex gap-3 sticky bottom-0 bg-white mt-auto sm:rounded-b-2xl">
+      <button onclick="closeScanModal()" class="flex-1 px-6 py-3 touch-btn bg-gray-100 active:bg-gray-200 text-gray-700 rounded-xl font-medium">取消</button>
+      <button id="scanCheckoutBtn" onclick="scanCheckout()" class="flex-1 px-6 py-3 touch-btn bg-orange-600 active:bg-orange-800 text-white rounded-xl font-bold hidden">出库</button>
+      <button id="scanConfirmBtn" onclick="confirmScanOp()" class="flex-1 px-6 py-3 touch-btn bg-blue-600 active:bg-blue-800 text-white rounded-xl font-bold">入库</button>
+    </div>
+    <div class="px-5 pb-3 text-center text-xs text-gray-400 bg-white">⌨ 扫码后按 <kbd class="px-2 py-0.5 bg-gray-100 border border-gray-300 rounded text-gray-600 font-mono">空格键</kbd> 快速录入</div>
+  </div>
+</div>
+
+<div id="cameraModal" class="mobile-full-modal fixed inset-0 z-50 hidden items-center justify-center modal-backdrop">
+  <div class="bg-gray-900 sm:bg-white sm:rounded-2xl sm:shadow-2xl w-full max-w-2xl sm:mx-4 h-full sm:h-auto flex flex-col">
+    <div class="px-5 py-4 sm:border-b sm:border-gray-100 flex items-center justify-between bg-gray-900 sm:bg-white sticky top-0 z-10">
+      <h3 class="text-xl font-bold text-white sm:text-gray-800 flex items-center gap-2">
+        <svg class="w-6 h-6 text-purple-400 sm:text-purple-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+        扫码
+      </h3>
+      <button onclick="closeCameraScanner()" class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 sm:bg-gray-100 text-white sm:text-gray-600 hover:bg-white/20">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+    <div class="flex-1 p-3 sm:p-6 flex flex-col justify-center">
+      <div id="reader" class="w-full max-w-md mx-auto rounded-xl overflow-hidden shadow-2xl"></div>
+      <div class="mt-4 flex items-center justify-center gap-3">
+        <button onclick="switchFlash()" id="flashBtn" class="px-4 py-2.5 bg-white/10 sm:bg-gray-100 text-white sm:text-gray-700 rounded-xl text-sm font-medium flex items-center gap-1.5">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>手电筒
+        </button>
+        <button onclick="switchCamera()" id="camBtn" class="px-4 py-2.5 bg-white/10 sm:bg-gray-100 text-white sm:text-gray-700 rounded-xl text-sm font-medium flex items-center gap-1.5">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>切换摄像头
+        </button>
+      </div>
+      <p id="cameraStatus" class="text-center text-gray-300 sm:text-gray-500 mt-4 px-4 text-sm">正在启动摄像头，请允许浏览器访问摄像头权限...</p>
+      <div id="cameraResult" class="hidden mt-4 p-4 bg-green-50 border-2 border-green-300 rounded-2xl max-w-md mx-auto w-full">
+        <div class="text-sm text-green-700 mb-1 font-medium">✅ 识别成功！</div>
+        <div id="cameraBarcode" class="text-xl font-bold text-green-900 break-all font-mono"></div>
+        <div class="flex gap-2 mt-3">
+          <button onclick="resumeScan()" class="flex-1 py-3 bg-gray-200 active:bg-gray-300 text-gray-700 rounded-xl font-medium">继续扫描</button>
+          <button onclick="useCameraResult()" class="flex-1 py-3 bg-green-600 active:bg-green-800 text-white rounded-xl font-bold">使用</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="fixed top-4 left-1/2 -translate-x-1/2 sm:translate-x-0 sm:left-auto sm:right-6 z-[200] hidden transition-all duration-300 w-[90%] sm:w-auto max-w-sm">
+  <div class="bg-gray-800/95 backdrop-blur text-white px-5 py-3.5 rounded-2xl shadow-2xl flex items-center gap-3">
+    <span id="toastIcon" class="shrink-0"></span>
+    <span id="toastMsg" class="flex-1"></span>
+  </div>
+</div>
+
+<!-- 出入库记录弹窗 -->
+<div id="logModal" class="mobile-full-modal fixed inset-0 z-50 hidden items-center justify-center modal-backdrop">
+  <div class="bg-white sm:rounded-2xl sm:shadow-2xl w-full max-w-3xl sm:mx-4 h-full sm:h-auto sm:max-h-[85vh] flex flex-col">
+    <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between sticky top-0 z-10 bg-white sm:rounded-t-2xl">
+      <h3 class="text-xl font-bold text-gray-800 flex items-center gap-2">
+        <svg class="w-6 h-6 text-indigo-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"></path></svg>
+        出入库记录
+      </h3>
+      <div class="flex items-center gap-2">
+        <button onclick="clearLogs()" class="px-3 py-1.5 text-sm text-red-500 bg-red-50 active:bg-red-100 rounded-lg">清空</button>
+        <button onclick="hideModal('logModal')" class="w-10 h-10 flex items-center justify-center rounded-full bg-gray-100 text-gray-600 hover:bg-gray-200">
+          <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>
+        </button>
+      </div>
+    </div>
+    <div id="logList" class="flex-1 overflow-y-auto p-4 space-y-2"></div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY = 'library_books_v2';
+const LOG_KEY = 'library_logs_v2';
+// ========= Gitee 云端配置 =========
+const GITEE = {
+  token: '5b77959246e6134e5eb6358162c9b767',
+  owner: 'Chen09291736',
+  repo: 'book-system',
+  branch: 'master',
+  dataFile: 'data.json'
+};
+// 自动判断当前环境：云端（Cloudflare Pages 等）还是本地服务器
+// localhost / 127.0.0.1 / cpolar 内网穿透 → 本地服务器模式
+// 其他（包括 *.pages.dev, *.gitee.io 等） → 云端 Gitee API 模式
+const IS_GITEE_PAGES = !(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname.endsWith('cpolar.cn') || location.hostname.endsWith('cpolar.io'));
+// Gitee API 基础 URL
+const GITEE_API = `https://gitee.com/api/v5/repos/${GITEE.owner}/${GITEE.repo}`;
+// 4个固定文件夹（顺序即展示顺序）
+const FOLDERS = [
+  { id: 'english',       name: '英语',          icon: '📖', color: 'rose' },
+  { id: 'math_science',  name: '数学与自然科学', icon: '🔬', color: 'blue' },
+  { id: 'politics',      name: '思政必修',       icon: '📜', color: 'amber' },
+  { id: 'general',       name: '大类',           icon: '📚', color: 'green' }
+];
+const FOLDER_COLOR = {
+  rose:   'bg-rose-50 text-rose-700 border-rose-200',
+  blue:   'bg-blue-50 text-blue-700 border-blue-200',
+  amber:  'bg-amber-50 text-amber-700 border-amber-200',
+  green:  'bg-green-50 text-green-700 border-green-200'
+};
+const FOLDER_BTN = {
+  rose:   'bg-rose-500 active:bg-rose-700',
+  blue:   'bg-blue-500 active:bg-blue-700',
+  amber:  'bg-amber-500 active:bg-amber-700',
+  green:  'bg-green-500 active:bg-green-700'
+};
+// 当前视图：'home' 为主页（全部），其它为文件夹 id
+let currentFolder = 'home';
+let books = [];
+let logs = [];
+let html5QrCode = null;
+let pendingCameraBarcode = null;
+let currentFacingMode = 'environment';
+let flashOn = false;
+
+// 数据同步：所有设备共享云端 data.json，实现跨设备同步
+let _saveTimer = null;
+let _loadPromise = null;
+let _lastSaveTime = 0;
+
+// ========= 序号/标签 固定字段管理 =========
+// 为某文件夹内所有书重新分配连续的 seq（基于当前 books 数组顺序）。
+// 注意：调用前应保证 books 数组顺序已正确。
+function reassignFolderSeqs(folder) {
+  const scoped = books.filter(b => (b.folder || 'general') === folder);
+  scoped.forEach((b, i) => {
+    b.seq = i + 1;
+    b.label = getLabel(i + 1);
+  });
+}
+// 出库/删除：标签内补位（不跨标签）
+// 把 folder 内 label 标签内、seq 大于出库 seq 的所有书，seq 前移 1，并同步更新 label。
+function shiftLabelSeqs(folder, label, fromSeq) {
+  const scoped = books.filter(b => (b.folder || 'general') === folder);
+  scoped.forEach(b => {
+    if (b.label === label && b.seq > fromSeq) {
+      b.seq = b.seq - 1;
+      b.label = getLabel(b.seq);
+    }
+  });
+}
+
+// ========= Gitee API 读写函数 =========
+// 从 Gitee 仓库读取 data.json
+function giteeReadData() {
+  const url = `${GITEE_API}/contents/${GITEE.dataFile}?ref=${GITEE.branch}&access_token=${GITEE.token}`;
+  return fetch(url).then(r => {
+    if (!r.ok) { if (r.status === 404) return null; throw new Error('Gitee read failed: ' + r.status); }
+    return r.json();
+  }).then(j => {
+    if (!j) return { content: null, sha: null };
+    // Gitee 返回的 content 是 base64
+    const content = j.content ? decodeURIComponent(escape(atob(j.content.replace(/\s/g,'')))) : null;
+    return { content: content ? JSON.parse(content) : null, sha: j.sha };
+  });
+}
+// 写入 data.json 到 Gitee 仓库
+// _giteeSha 有值 = 文件已存在 = PUT 更新；为 null = 新建 = POST
+function giteeWriteData(payload, sha) {
+  const url = `${GITEE_API}/contents/${GITEE.dataFile}`;
+  const body = {
+    access_token: GITEE.token,
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(payload)))),
+    message: 'auto-save: ' + new Date().toISOString(),
+    branch: GITEE.branch
+  };
+  // 已存在的文件用 PUT + sha；新建文件用 POST
+  const method = sha ? 'PUT' : 'POST';
+  if (sha) body.sha = sha;
+  return fetch(url, {
+    method: method,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  }).then(r => {
+    if (!r.ok) throw new Error('Gitee write failed: ' + r.status);
+    return r.json();
+  }).then(j => {
+    // 返回新 sha 用于下次更新
+    if (j.content && j.content.sha) return j.content.sha;
+    return sha;
+  });
+}
+// 全局 sha：当前云端文件的版本号，用于下次更新
+let _giteeSha = null;
+
+function loadBooks() {
+  // 根据环境选择数据源
+  if (IS_GITEE_PAGES) {
+    // Gitee Pages 模式：从 Gitee API 加载
+    giteeReadData().then(({ content, sha }) => {
+      _giteeSha = sha;
+      if (content && content.books) {
+        books = content.books;
+        if (content.logs) logs = content.logs;
+        migrateData();
+      } else {
+        // 云端无数据，尝试 localStorage 缓存
+        try {
+          books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+          migrateData();
+        } catch(e) { books = []; logs = []; }
+      }
+      renderBooks(); renderLogs(); renderFolderCards();
+    }).catch(err => {
+      console.error('Gitee load error:', err);
+      // 失败回退到 localStorage
+      try {
+        books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+        migrateData();
+      } catch(e) { books = []; logs = []; }
+      renderBooks(); renderLogs(); renderFolderCards();
+      showToast('云端加载失败，使用本地缓存', 'error');
+    });
+  } else {
+    // 本地服务器模式：从 /api/data 加载
+    fetch('/api/data').then(r => r.json()).then(data => {
+      if (data && data.books) {
+        books = data.books;
+        if (data && data.logs) logs = data.logs;
+        migrateData();
+      }
+      renderBooks(); renderLogs(); renderFolderCards();
+    }).catch(err => {
+      try {
+        books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+        logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+        migrateData();
+      } catch(e) { books = []; logs = []; }
+      renderBooks(); renderLogs(); renderFolderCards();
+    });
+  }
+}
+
+// 数据迁移：补全 folder/seq/label 字段
+function migrateData() {
+  let changed = false;
+  books.forEach(b => {
+    if (!b.folder || !FOLDERS.some(f => f.id === b.folder)) {
+      b.folder = 'general';
+      changed = true;
+    }
+  });
+  FOLDERS.forEach(f => {
+    const scoped = books.filter(b => (b.folder || 'general') === f.id);
+    let needReassign = false;
+    scoped.forEach(b => {
+      if (!b.seq || !b.label) { needReassign = true; }
+    });
+    if (needReassign) {
+      scoped.forEach((b, i) => { b.seq = i + 1; b.label = getLabel(i + 1); changed = true; });
+    }
+  });
+  if (changed) saveBooks();
+}
+function saveBooks() {
+  // 同时保存到 localStorage 缓存
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(books)); } catch(e) {}
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(logs)); } catch(e) {}
+  // 节流：500ms 内只发送一次，避免高频写入
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(syncToServer, 500);
+}
+function syncToServer() {
+  const payload = { books, logs };
+  if (IS_GITEE_PAGES) {
+    // Gitee Pages 模式：写入 Gitee 仓库
+    giteeWriteData(payload, _giteeSha).then(newSha => {
+      _giteeSha = newSha;
+      _lastSaveTime = Date.now();
+    }).catch(err => {
+      console.warn('同步到 Gitee 失败：', err);
+      // sha 过期或冲突：重新读取最新 sha 后重试一次
+      giteeReadData().then(({ sha }) => {
+        _giteeSha = sha;
+        return giteeWriteData(payload, _giteeSha);
+      }).then(newSha => { _giteeSha = newSha; _lastSaveTime = Date.now(); })
+        .catch(e => console.error('重试失败:', e));
+    });
+  } else {
+    // 本地服务器模式：写入本地 /api/data
+    fetch('/api/data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(r => r.json()).then(data => {
+      _lastSaveTime = Date.now();
+    }).catch(err => {
+      console.warn('同步到服务器失败：', err);
+    });
+  }
+}
+
+// 将数据备份到服务器（服务器会保存为JSON并生成PDF）
+let lastBackupTime = 0;
+function backupToServer(showHint) {
+  if (books.length === 0) {
+    if (showHint) showToast('暂无数据可备份');
+    return;
+  }
+  // 节流：手动按钮无限制，自动同步最少5分钟一次
+  const now = Date.now();
+  if (!showHint && now - lastBackupTime < 5 * 60 * 1000) return;
+  lastBackupTime = now;
+
+  const payload = {
+    books: books.map(b => ({ ...b, _seq: b.seq || 0, _label: b.label || getLabel(b.seq || 1) })),
+    logs: logs,
+    exportTime: new Date().toISOString(),
+    bookCount: books.length,
+    logCount: logs.length
+  };
+
+  if (showHint) showToast('正在生成PDF备份...');
+
+  fetch('/api/backup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  }).then(r => r.json()).then(data => {
+    if (data.success) {
+      localStorage.setItem('last_backup_time', now.toString());
+      if (showHint) showToast('已备份PDF到电脑：' + (data.pdfFile || 'backups目录'));
+    } else if (showHint) {
+      showToast('备份失败：' + (data.error || '未知错误'), 'error');
+    }
+  }).catch(err => {
+    if (showHint) showToast('备份失败：网络错误', 'error');
+  });
+}
+
+// 每周自动备份：页面加载时检查上次备份时间，超过7天自动触发
+function checkAutoBackup() {
+  const last = parseInt(localStorage.getItem('last_backup_time') || '0');
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  if (Date.now() - last > weekMs && books.length > 0) {
+    backupToServer(false);
+  }
+}
+
+// 扫码枪自动录入模式：扫码后自动查询并录入，无需手动点击
+let autoScanEnabled = (localStorage.getItem('auto_scan_enabled') === 'true');
+function toggleAutoScan() {
+  autoScanEnabled = !autoScanEnabled;
+  localStorage.setItem('auto_scan_enabled', autoScanEnabled.toString());
+  const btn = document.getElementById('autoScanBtn');
+  const label = document.getElementById('autoScanLabel');
+  if (autoScanEnabled) {
+    btn.className = 'px-3 py-3 touch-btn bg-green-600 active:bg-green-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm';
+    label.textContent = '自动已开';
+    showToast('已开启自动录入：扫码后自动录入');
+  } else {
+    btn.className = 'px-3 py-3 touch-btn bg-gray-400 active:bg-gray-600 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm';
+    label.textContent = '自动录入';
+    showToast('已关闭自动录入');
+  }
+}
+function updateAutoScanBtn() {
+  const btn = document.getElementById('autoScanBtn');
+  const label = document.getElementById('autoScanLabel');
+  if (!btn || !label) return;
+  if (autoScanEnabled) {
+    btn.className = 'px-3 py-3 touch-btn bg-green-600 active:bg-green-800 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm';
+    label.textContent = '自动已开';
+  } else {
+    btn.className = 'px-3 py-3 touch-btn bg-gray-400 active:bg-gray-600 text-white rounded-xl font-medium flex items-center justify-center gap-1.5 text-sm';
+    label.textContent = '自动录入';
+  }
+}
+// 日志已随 books 一起加载/保存到服务器，这里只保留兼容函数
+function loadLogs() {
+  // logs 已在 loadBooks() 中加载，这里无需重复加载
+}
+function saveLogs() {
+  try { localStorage.setItem(LOG_KEY, JSON.stringify(logs)); } catch(e) {}
+  // 与 books 一起同步到服务器
+  if (_saveTimer) clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(syncToServer, 500);
+}
+function addLog(type, book, stockAfter) {
+  logs.unshift({
+    id: uid(), type,
+    barcode: book.barcode, title: book.title,
+    seq: book._seq || '',
+    folder: book.folder || (inFolder() ? currentFolder : 'general'),
+    stockAfter: stockAfter || 0,
+    time: new Date().toISOString()
+  });
+  if (logs.length > 500) logs = logs.slice(0, 500);
+  saveLogs();
+}
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function findByBarcode(code) { return books.find(b => b.barcode === code.trim()); }
+function vibrate(ms=30) { try { if (navigator.vibrate) navigator.vibrate(ms); } catch(e){} }
+
+// 通过ISBN查询图书信息（豆瓣网页+API+Google Books三重数据源）
+function fetchBookInfo(isbn) {
+  return fetch(`/api/book/${isbn}`).then(r => r.json()).then(data => {
+    if (data.error) return null;
+    // 统一格式：直接返回解析后的字段
+    if (data.title) {
+      return {
+        title: data.title || '',
+        author: data.author || '',
+        publisher: data.publisher || '',
+        pubDate: data.pubDate || '',
+        price: parseFloat(data.price) || 0,
+        pages: data.pages || '',
+        category: data.category || '',
+        source: data.source || ''
+      };
+    }
+    return null;
+  }).catch(() => null);
+}
+
+function showModal(id) { const m = document.getElementById(id); m.classList.remove('hidden'); m.classList.add('flex'); document.body.style.overflow = 'hidden'; }
+function hideModal(id) { const m = document.getElementById(id); m.classList.add('hidden'); m.classList.remove('flex'); document.body.style.overflow = ''; }
+
+function showToast(msg, type='success') {
+  const toast = document.getElementById('toast');
+  const icon = document.getElementById('toastIcon');
+  document.getElementById('toastMsg').textContent = msg;
+  if (type === 'success') { icon.innerHTML = '<svg class="w-5 h-5 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"></path></svg>'; vibrate([30]); }
+  else if (type === 'error') { icon.innerHTML = '<svg class="w-5 h-5 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M6 18L18 6M6 6l12 12"></path></svg>'; vibrate([40,30,40]); }
+  else { icon.innerHTML = '<svg class="w-5 h-5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>'; }
+  toast.classList.remove('hidden');
+  setTimeout(() => toast.classList.add('hidden'), 2400);
+}
+
+// 根据序号计算标签：每50本一组，1-9用数字，之后用A-Z字母
+function getLabel(seq) {
+  const group = Math.floor((seq - 1) / 50); // 0-based group index
+  if (group < 9) return String(group + 1); // 1-9
+  return String.fromCharCode(65 + (group - 9)); // A=65, B=66, ...
+}
+
+// 更新分类下拉列表：自动收集所有已用过的分类，方便快速选择
+function updateCategoryList() {
+  const set = new Set();
+  books.forEach(b => { if (b.category && b.category.trim()) set.add(b.category.trim()); });
+  // 也从 localStorage 恢复历史分类（即使对应书已删除，分类仍保留）
+  let savedCats = [];
+  try { savedCats = JSON.parse(localStorage.getItem('all_categories') || '[]'); } catch(e) {}
+  savedCats.forEach(c => set.add(c));
+  // 按字母排序，方便查找
+  const arr = Array.from(set).sort((a, b) => a.localeCompare(b, 'zh'));
+  const dl = document.getElementById('categoryList');
+  if (dl) dl.innerHTML = arr.map(c => `<option value="${escapeHtml(c)}">`).join('');
+}
+
+// 保存分类到历史列表（持久化）
+function rememberCategory(cat) {
+  if (!cat || !cat.trim()) return;
+  let savedCats = [];
+  try { savedCats = JSON.parse(localStorage.getItem('all_categories') || '[]'); } catch(e) {}
+  const set = new Set(savedCats);
+  set.add(cat.trim());
+  // 最多保留 200 个分类
+  const arr = Array.from(set).sort((a, b) => a.localeCompare(b, 'zh')).slice(0, 200);
+  localStorage.setItem('all_categories', JSON.stringify(arr));
+}
+
+// 更新分类筛选下拉
+function updateCategoryFilter(currentValue, scopedBooks) {
+  const sel = document.getElementById('categoryFilter');
+  if (!sel) return;
+  const source = scopedBooks || books;
+  const set = new Set();
+  source.forEach(b => { if (b.category && b.category.trim()) set.add(b.category.trim()); });
+  let savedCats = [];
+  try { savedCats = JSON.parse(localStorage.getItem('all_categories') || '[]'); } catch(e) {}
+  savedCats.forEach(c => set.add(c));
+  const arr = Array.from(set).sort((a, b) => a.localeCompare(b, 'zh'));
+  const opts = ['<option value="">全部分类</option>'].concat(arr.map(c => `<option value="${escapeHtml(c)}">${escapeHtml(c)}</option>`)).join('');
+  // 只在选项变化时更新，避免重置正在交互的下拉
+  if (sel.innerHTML !== opts) {
+    sel.innerHTML = opts;
+    if (currentValue) sel.value = currentValue;
+  }
+}
+
+// 渲染分类徽章：按文件夹层级显示，如 "计算机/编程" 显示为 计算机 › 编程
+function renderCategoryBadges(category, mobile) {
+  if (!category || !category.trim()) {
+    return mobile ? '<span class="text-gray-400">-</span>' : '<span class="text-gray-400">-</span>';
+  }
+  const parts = category.split('/').map(s => s.trim()).filter(Boolean);
+  // 不同层级用不同颜色
+  const colors = ['bg-blue-100 text-blue-700', 'bg-indigo-100 text-indigo-700', 'bg-purple-100 text-purple-700', 'bg-pink-100 text-pink-700'];
+  if (mobile) {
+    return parts.map((p, i) => `<span class="px-1.5 py-0.5 ${colors[i % colors.length]} rounded text-xs font-medium">${escapeHtml(p)}</span>`).join('<span class="text-gray-400 mx-0.5">›</span>');
+  } else {
+    return parts.map((p, i) => `<span class="inline-block px-2 py-0.5 ${colors[i % colors.length]} rounded text-xs font-medium">${escapeHtml(p)}</span>`).join('<span class="text-gray-400 mx-0.5">›</span>');
+  }
+}
+
+// 渲染主页文件夹卡片
+function renderFolderCards() {
+  const el = document.getElementById('folderCards');
+  if (!el) return;
+  el.innerHTML = FOLDERS.map(f => {
+    const count = books.filter(b => b.folder === f.id).length;
+    // 不同库存：同ISBN的多次录入算库存
+    const barcodes = new Set(books.filter(b => b.folder === f.id).map(b => b.barcode));
+    const totalQty = count;
+    const uniqueTitles = barcodes.size;
+    return `<button onclick="openFolder('${f.id}')" class="touch-btn text-left p-4 rounded-xl border-2 ${FOLDER_COLOR[f.color]} hover:shadow-md transition flex items-start gap-3 active:scale-95">
+      <div class="text-4xl shrink-0">${f.icon}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-bold text-base">${f.name}</div>
+        <div class="text-xs mt-1 opacity-80">${uniqueTitles} 种 / ${totalQty} 本</div>
+        <div class="text-xs mt-0.5 opacity-60">点击进入 ›</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+
+// 进入文件夹视图
+function openFolder(folderId) {
+  currentFolder = folderId;
+  const f = FOLDERS.find(x => x.id === folderId);
+  if (!f) return;
+  document.getElementById('folderView').classList.add('hidden');
+  document.getElementById('folderHeader').classList.remove('hidden');
+  const titleEl = document.getElementById('folderTitle');
+  titleEl.innerHTML = `<div class="flex items-center gap-2 min-w-0">
+    <span class="text-3xl shrink-0">${f.icon}</span>
+    <div class="min-w-0">
+      <div class="font-bold text-lg sm:text-xl text-gray-800 truncate">${f.name}</div>
+      <div class="text-xs text-gray-500">此文件夹内的书籍与记录</div>
+    </div>
+  </div>`;
+  document.getElementById('pageTitle').textContent = f.name;
+  // 重置搜索
+  document.getElementById('searchInput').value = '';
+  const cf = document.getElementById('categoryFilter'); if (cf) cf.value = '';
+  renderBooks();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 返回主页（全部）
+function closeFolder() {
+  currentFolder = 'home';
+  document.getElementById('folderView').classList.remove('hidden');
+  document.getElementById('folderHeader').classList.add('hidden');
+  document.getElementById('pageTitle').textContent = '图书管理系统';
+  // 重置搜索
+  document.getElementById('searchInput').value = '';
+  const cf = document.getElementById('categoryFilter'); if (cf) cf.value = '';
+  renderBooks();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+// 当前视图是否在文件夹内（用于过滤逻辑）
+function inFolder() { return currentFolder !== 'home'; }
+
+// 获取当前文件夹对象
+function currentFolderObj() { return FOLDERS.find(f => f.id === currentFolder); }
+
+function renderBooks() {
+  const keyword = (document.getElementById('searchInput').value || '').trim().toLowerCase();
+  const catFilter = document.getElementById('categoryFilter') ? document.getElementById('categoryFilter').value : '';
+  // 按当前视图过滤书籍
+  const scopedBooks = inFolder() ? books.filter(b => b.folder === currentFolder) : books;
+  // 预计算库存量（基于同ISBN，仅限当前视图范围内）
+  const stockMap = {};
+  scopedBooks.forEach(b => { stockMap[b.barcode] = (stockMap[b.barcode] || 0) + 1; });
+  // 保持原来的显示顺序（数组顺序=录入顺序），不重新排序
+  // seq/label 仅用于显示和标签补位，不影响显示顺序
+  const list = scopedBooks.map(b => ({
+    ...b,
+    _seq: b.seq || 0,
+    _label: b.label || getLabel(b.seq || 1),
+    _stock: stockMap[b.barcode]
+  })).filter(b => (!keyword || b.title.toLowerCase().includes(keyword) || b.barcode.includes(keyword))
+              && (!catFilter || (b.category || '') === catFilter));
+  // 更新分类筛选下拉（保持当前选中项）
+  updateCategoryFilter(catFilter, scopedBooks);
+  // 更新文件夹卡片（主页）
+  renderFolderCards();
+  // 控制文件夹列显示：主页显示，文件夹视图隐藏
+  const showFolderCol = !inFolder();
+  document.getElementById('folderColHeader').classList.toggle('hidden', !showFolderCol);
+  document.querySelectorAll('.folderCol').forEach(td => td.classList.toggle('hidden', !showFolderCol));
+  // 更新计数
+  document.getElementById('totalCount').textContent = scopedBooks.length;
+  document.getElementById('totalQty').textContent = list.length;
+  const tbody = document.getElementById('bookListDesktop');
+  const mbList = document.getElementById('bookListMobile');
+  const empty = document.getElementById('emptyState');
+  if (list.length === 0) {
+    tbody.innerHTML = ''; mbList.innerHTML = ''; empty.classList.remove('hidden');
+    empty.querySelector('p:first-of-type').textContent = inFolder() ? '此文件夹暂无图书' : '暂无图书数据';
+    empty.querySelector('p:last-of-type').textContent = inFolder() ? '点击上方"新增图书"或扫码录入到此文件夹' : '扫码录入、新增图书 或 从 Excel 导入开始使用';
+  } else {
+    empty.classList.add('hidden');
+    tbody.innerHTML = list.map(b => `
+      <tr class="book-row" data-id="${b.id}">
+        <td class="px-4 py-3 text-center text-sm font-bold text-gray-500">${b._seq}</td>
+        <td class="px-4 py-3 text-center"><span class="inline-block px-2.5 py-1 bg-indigo-100 text-indigo-700 rounded-lg text-sm font-bold">${b._label}</span></td>
+        <td class="px-4 py-3 text-sm font-mono text-gray-700">${escapeHtml(b.barcode)}</td>
+        <td class="px-4 py-3 text-sm text-gray-900 font-medium">${escapeHtml(b.title)}</td>
+        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(b.author || '-')}</td>
+        <td class="px-4 py-3 text-sm text-gray-600">${escapeHtml(b.publisher || '-')}</td>
+        <td class="folderCol px-4 py-3 text-sm hidden">${(() => { const f = FOLDERS.find(x => x.id === b.folder); return f ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 ${FOLDER_COLOR[f.color]} rounded text-xs font-medium">${f.icon}${escapeHtml(f.name)}</span>` : '<span class="text-gray-400">-</span>'; })()}</td>
+        <td class="px-4 py-3 text-sm">${b.category ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded text-xs font-medium"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>${escapeHtml(b.category)}</span>` : '<span class="text-gray-400">-</span>'}</td>
+        <td class="px-4 py-3 text-sm text-gray-900 text-right font-medium">¥${(b.price||0).toFixed(2)}</td>
+        <td class="px-4 py-3 text-center"><span class="inline-block px-2.5 py-1 ${b._stock > 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'} rounded-lg text-sm font-bold">${b._stock}</span></td>
+        <td class="px-4 py-3"><div class="flex items-center justify-center gap-2">
+          <button onclick="editBook('${b.id}')" class="px-3 py-1.5 text-sm text-blue-600 bg-blue-50 active:bg-blue-100 rounded-lg">编辑</button>
+          <button onclick="checkoutBook('${b.id}')" class="px-3 py-1.5 text-sm text-orange-600 bg-orange-50 active:bg-orange-100 rounded-lg">出库</button>
+          <button onclick="deleteBook('${b.id}')" class="px-3 py-1.5 text-sm text-red-500 bg-red-50 active:bg-red-100 rounded-lg">删除</button>
+        </div></td>
+      </tr>`).join('');
+    mbList.innerHTML = list.map(b => `
+      <div class="mobile-card bg-white rounded-xl shadow-sm px-4 py-3" data-id="${b.id}">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-start gap-2 flex-1 min-w-0">
+            <span class="text-lg font-bold text-gray-400 mt-0.5 shrink-0">${b._seq}</span>
+            <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded text-xs font-bold mt-1 shrink-0">${b._label}</span>
+            <div class="flex-1 min-w-0">
+              <div class="font-bold text-gray-900 text-base leading-snug">${escapeHtml(b.title)}</div>
+              <div class="text-xs text-gray-500 mt-1 font-mono">${escapeHtml(b.barcode)}</div>
+            </div>
+          </div>
+          <div class="flex flex-col items-end gap-1 shrink-0">
+            <span class="px-2 py-0.5 bg-blue-50 text-blue-600 rounded text-xs font-semibold whitespace-nowrap">¥${(b.price||0).toFixed(2)}</span>
+            <span class="px-2 py-0.5 ${b._stock > 1 ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'} rounded text-xs font-bold whitespace-nowrap">库存 ${b._stock}</span>
+          </div>
+        </div>
+        <div class="text-xs text-gray-600 mb-3 flex flex-wrap gap-x-3 gap-y-1">
+          <span>✍️ ${escapeHtml(b.author || '未知')}</span>
+          <span>🏢 ${escapeHtml(b.publisher || '-')}</span>
+          ${b.category ? `<span class="inline-flex items-center gap-0.5 text-amber-700"><svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M2 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"></path></svg>${escapeHtml(b.category)}</span>` : ''}
+          ${b.location ? `<span>📍 ${escapeHtml(b.location)}</span>` : ''}
+        </div>
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-gray-100">
+          <button onclick="editBook('${b.id}')" class="w-10 h-10 flex items-center justify-center rounded-xl text-blue-600 bg-blue-50 active:bg-blue-100">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg></button>
+          <button onclick="checkoutBook('${b.id}')" class="px-3 h-10 flex items-center justify-center rounded-xl text-orange-600 bg-orange-50 active:bg-orange-200 font-bold text-sm">出库</button>
+          <button onclick="deleteBook('${b.id}')" class="w-10 h-10 flex items-center justify-center rounded-xl text-red-500 bg-red-50 active:bg-red-100">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V4a1 1 0 011-1h6a1 1 0 011 1v3"></path></svg></button>
+        </div>
+      </div>`).join('');
+  }
+  document.getElementById('totalCount').textContent = books.length;
+  document.getElementById('totalQty').textContent = books.length;
+}
+
+function escapeHtml(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtTime(iso) { const d = new Date(iso); return `${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; }
+
+function openLogModal() {
+  loadLogs();
+  renderLogs();
+  // 更新历史记录弹窗标题
+  const titleEl = document.querySelector('#logModal .text-lg, #logModal h3');
+  if (titleEl) {
+    const f = inFolder() ? currentFolderObj() : null;
+    titleEl.textContent = f ? `${f.icon} ${f.name} - 出入库记录` : '出入库记录';
+  }
+  showModal('logModal');
+}
+function renderLogs() {
+  const el = document.getElementById('logList');
+  // 按当前视图过滤：文件夹内只显示该文件夹的记录，主页显示全部
+  const scopedLogs = inFolder() ? logs.filter(l => (l.folder || 'general') === currentFolder) : logs;
+  if (scopedLogs.length === 0) {
+    el.innerHTML = `<div class="text-center text-gray-400 py-12 text-sm">${inFolder() ? '此文件夹暂无出入库记录' : '暂无出入库记录'}</div>`;
+    return;
+  }
+  el.innerHTML = scopedLogs.map(l => {
+    const isIn = l.type === 'in';
+    const f = FOLDERS.find(x => x.id === (l.folder || 'general'));
+    return `<div class="flex items-center gap-3 p-3 rounded-xl ${isIn ? 'bg-green-50' : 'bg-orange-50'} border ${isIn ? 'border-green-200' : 'border-orange-200'}">
+      <div class="w-10 h-10 flex items-center justify-center rounded-full ${isIn ? 'bg-green-500' : 'bg-orange-500'} text-white text-lg shrink-0">${isIn ? '📥' : '📤'}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-medium text-gray-900 text-sm truncate">${escapeHtml(l.title)}</div>
+        <div class="text-xs text-gray-500 mt-0.5">
+          <span class="font-mono">${escapeHtml(l.barcode)}</span>
+          ${l.seq ? `<span class="ml-2">序号 ${l.seq}</span>` : ''}
+          <span class="ml-2">库存 ${l.stockAfter} 本</span>
+          ${f && !inFolder() ? `<span class="ml-2">${f.icon}${escapeHtml(f.name)}</span>` : ''}
+        </div>
+      </div>
+      <div class="text-right shrink-0">
+        <div class="text-xs font-semibold ${isIn ? 'text-green-600' : 'text-orange-600'}">${isIn ? '入库' : '出库'}</div>
+        <div class="text-xs text-gray-400 mt-0.5">${fmtTime(l.time)}</div>
+      </div>
+    </div>`;
+  }).join('');
+}
+function clearLogs() {
+  if (logs.length === 0) return;
+  if (!confirm('确认清空所有出入库记录？此操作不可撤销。')) return;
+  logs = []; saveLogs(); renderLogs(); showToast('记录已清空');
+}
+
+function checkoutBook(id) {
+  const b = books.find(x => x.id === id); if (!b) return;
+  // 该书所在文件夹与标签（使用存储的固定 seq/label）
+  const folder = b.folder || 'general';
+  const seq = b.seq || 0;
+  const label = b.label || getLabel(seq);
+  const f = FOLDERS.find(x => x.id === folder);
+  if (!confirm(`确认出库《${b.title}》（${f ? f.icon + f.name + ' · ' : ''}序号${seq}，标签${label}）吗？\n出库后该记录被移除，同标签内的后续书序号前移补位，跨标签的书不受影响。`)) return;
+  // 库存计算：按文件夹内同ISBN数量
+  const scopedBooks = books.filter(x => x.folder === folder);
+  const stockAfter = scopedBooks.filter(x => x.barcode === b.barcode && x.id !== b.id).length;
+  addLog('out', { ...b, _seq: seq, _label: label }, stockAfter);
+  // 移除该书
+  books = books.filter(x => x.id !== id);
+  // 同标签内 seq > 出库 seq 的所有书前移 1（不跨标签）
+  shiftLabelSeqs(folder, label, seq);
+  saveBooks(); renderBooks(); vibrate(30);
+  showToast(`📤 已出库《${b.title}》（${f ? f.name + '·' : ''}标签${label}），剩余 ${stockAfter} 本`);
+}
+function setScanQty(n) { document.getElementById('scanQty').value = n; }
+function quickScanReentry(id) { const b = books.find(x => x.id === id); if (!b) return; openScanModal(b.barcode); }
+
+function openAddModal(barcode='') {
+  document.getElementById('modalTitle').textContent = '新增图书';
+  ['editId','f_barcode','f_title','f_author','f_publisher','f_category','f_price','f_location'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('f_barcode').value = barcode;
+  updateCategoryList();
+  // 显示当前录入到的文件夹
+  const hint = document.getElementById('modalFolderHint');
+  if (inFolder()) {
+    const f = currentFolderObj();
+    hint.innerHTML = `${f.icon} 将录入到：<strong>${f.name}</strong> 文件夹`;
+    hint.classList.remove('hidden');
+  } else {
+    hint.innerHTML = '📚 主页录入默认归入：<strong>大类</strong> 文件夹';
+    hint.classList.remove('hidden');
+  }
+  showModal('bookModal');
+}
+function editBook(id) {
+  const b = books.find(x => x.id === id); if (!b) return;
+  document.getElementById('modalTitle').textContent = '编辑图书';
+  document.getElementById('editId').value = b.id;
+  document.getElementById('f_barcode').value = b.barcode;
+  document.getElementById('f_title').value = b.title;
+  document.getElementById('f_author').value = b.author || '';
+  document.getElementById('f_publisher').value = b.publisher || '';
+  document.getElementById('f_category').value = b.category || '';
+  document.getElementById('f_price').value = b.price || '';
+  document.getElementById('f_location').value = b.location || '';
+  updateCategoryList();
+  showModal('bookModal');
+}
+function closeBookModal() { hideModal('bookModal'); }
+function saveBook() {
+  const id = document.getElementById('editId').value;
+  const barcode = document.getElementById('f_barcode').value.trim();
+  const title = document.getElementById('f_title').value.trim();
+  if (!barcode) return showToast('请输入条形码', 'error');
+  if (!title) return showToast('请输入书名', 'error');
+  const data = {
+    barcode, title,
+    author: document.getElementById('f_author').value.trim(),
+    publisher: document.getElementById('f_publisher').value.trim(),
+    category: document.getElementById('f_category').value.trim(),
+    price: parseFloat(document.getElementById('f_price').value) || 0,
+    location: document.getElementById('f_location').value.trim()
+  };
+  if (id) {
+    const i = books.findIndex(b => b.id === id);
+    books[i] = { ...books[i], ...data };
+    showToast('已更新图书信息');
+  } else {
+    // 录入新书：自动归入当前所在文件夹（主页时默认"大类"）
+    const folder = inFolder() ? currentFolder : 'general';
+    // 计算此文件夹内当前最大 seq，新书 seq = 最大+1
+    const scopedForSeq = books.filter(b => (b.folder || 'general') === folder);
+    let maxSeq = 0;
+    scopedForSeq.forEach(b => { if (b.seq && b.seq > maxSeq) maxSeq = b.seq; });
+    const newSeq = maxSeq + 1;
+    const newBook = { id: uid(), addedAt: new Date().toISOString(), folder, seq: newSeq, label: getLabel(newSeq), ...data };
+    books.push(newBook);
+    // 计算此文件夹内的库存与序号
+    const scopedBooks = books.filter(b => b.folder === folder);
+    const newStock = scopedBooks.filter(b => b.barcode === barcode).length;
+    addLog('in', { ...newBook, _seq: newSeq, _label: getLabel(newSeq), folder }, newStock);
+    const f = FOLDERS.find(x => x.id === folder);
+    showToast(`已录入到「${f ? f.name : folder}」文件夹，序号 ${newSeq}，标签 ${getLabel(newSeq)}`);
+  }
+  rememberCategory(data.category);
+  saveBooks(); renderBooks(); closeBookModal();
+}
+function deleteBook(id) {
+  const b = books.find(x => x.id === id); if (!b) return;
+  if (!confirm(`确定删除《${b.title}》吗？`)) return;
+  // 同标签内补位（避免跨标签前移）
+  const folder = b.folder || 'general';
+  const label = b.label || getLabel(b.seq || 1);
+  const seq = b.seq || 0;
+  books = books.filter(x => x.id !== id);
+  if (seq) shiftLabelSeqs(folder, label, seq);
+  saveBooks(); renderBooks(); showToast('已删除图书');
+}
+
+let scanContext = null;
+let fetchedBookInfo = null;
+function processBarcode() {
+  const input = document.getElementById('barcodeInput'); const code = input.value.trim();
+  if (!code) { showToast('请输入或扫描条形码', 'error'); return; }
+  openScanModal(code); input.value = '';
+}
+function openScanModal(barcode) {
+  scanContext = { barcode };
+  fetchedBookInfo = null;
+  document.getElementById('scanBarcode').textContent = barcode;
+  ['scanApiLoading','scanApiResult','scanApiFail'].forEach(id => document.getElementById(id).classList.add('hidden'));
+  // 在当前视图范围内查找
+  const scopedBooks = inFolder() ? books.filter(b => b.folder === currentFolder) : books;
+  const exist = scopedBooks.find(b => b.barcode === barcode.trim());
+  const infoBox = document.getElementById('scanBookInfo');
+  const newHint = document.getElementById('scanNewBookHint');
+  const confirmBtn = document.getElementById('scanConfirmBtn');
+  const checkoutBtn = document.getElementById('scanCheckoutBtn');
+  // 提示当前所在文件夹
+  const folderHint = document.getElementById('scanFolderHint');
+  if (folderHint) {
+    if (inFolder()) {
+      const f = currentFolderObj();
+      folderHint.innerHTML = `${f.icon} 当前扫码目标：<strong>${f.name}</strong> 文件夹`;
+      folderHint.classList.remove('hidden');
+    } else {
+      folderHint.innerHTML = '📚 主页扫码默认归入：<strong>大类</strong> 文件夹';
+      folderHint.classList.remove('hidden');
+    }
+  }
+  if (exist) {
+    infoBox.classList.remove('hidden'); newHint.classList.add('hidden');
+    document.getElementById('scanBookTitle').textContent = exist.title;
+    const count = scopedBooks.filter(b => b.barcode === barcode).length;
+    document.getElementById('scanCurrentQty').textContent = count;
+    confirmBtn.textContent = '入库（再录一本）';
+    confirmBtn.className = 'flex-1 px-6 py-3 touch-btn bg-blue-600 active:bg-blue-800 text-white rounded-xl font-bold';
+    checkoutBtn.classList.remove('hidden');
+  } else {
+    infoBox.classList.add('hidden'); newHint.classList.remove('hidden');
+    confirmBtn.textContent = '录入新书';
+    confirmBtn.className = 'flex-1 px-6 py-3 touch-btn bg-green-600 active:bg-green-800 text-white rounded-xl font-bold';
+    checkoutBtn.classList.add('hidden');
+  }
+  showModal('scanModal'); vibrate(30);
+  // 自动联网查询图书信息
+  if (barcode.length >= 10) {
+    document.getElementById('scanApiLoading').classList.remove('hidden');
+    fetchBookInfo(barcode).then(info => {
+      document.getElementById('scanApiLoading').classList.add('hidden');
+      if (info && info.title) {
+        fetchedBookInfo = info;
+        document.getElementById('apiTitle').textContent = info.title;
+        document.getElementById('apiAuthor').textContent = info.author || '-';
+        document.getElementById('apiPublisher').textContent = info.publisher || '-';
+        if (info.price > 0) { document.getElementById('apiPrice').textContent = '¥' + info.price.toFixed(2); document.getElementById('apiPriceRow').classList.remove('hidden'); }
+        else { document.getElementById('apiPriceRow').classList.add('hidden'); }
+        if (info.category) { document.getElementById('apiCategory').textContent = info.category; document.getElementById('apiCategoryRow').classList.remove('hidden'); }
+        else { document.getElementById('apiCategoryRow').classList.add('hidden'); }
+        document.getElementById('scanApiResult').classList.remove('hidden');
+        // 如果是新书，更新按钮文字
+        if (!exist) { confirmBtn.textContent = '一键录入'; }
+      } else {
+        document.getElementById('scanApiFail').classList.remove('hidden');
+      }
+      // 自动录入模式：信息查询完成后自动录入
+      if (autoScanEnabled) {
+        // 新书但没查到信息，跳过不自动录入
+        if (!exist && !(info && info.title)) {
+          showToast('未查到图书信息，需手动录入', 'error');
+          return;
+        }
+        // 自动录入：延迟800ms让用户看到信息
+        setTimeout(() => {
+          confirmScanOp();
+        }, 800);
+      }
+    });
+    // 自动录入模式：已收录的书，直接自动入库，不等查询
+    if (autoScanEnabled && exist) {
+      setTimeout(() => {
+        confirmScanOp();
+      }, 600);
+    }
+  } else {
+    // 条形码太短，无法查询
+    if (autoScanEnabled) {
+      showToast('条形码太短，无法自动录入', 'error');
+    }
+  }
+}
+function closeScanModal() { hideModal('scanModal'); scanContext = null; }
+function confirmScanOp() {
+  const barcode = scanContext.barcode;
+  // 当前扫码目标文件夹（主页默认"大类"）
+  const folder = inFolder() ? currentFolder : 'general';
+  const scopedBooks = books.filter(b => b.folder === folder);
+  // 计算新 seq（文件夹内最大+1）
+  let maxSeq = 0;
+  scopedBooks.forEach(b => { if (b.seq && b.seq > maxSeq) maxSeq = b.seq; });
+  const newSeq = maxSeq + 1;
+  const newLabel = getLabel(newSeq);
+  const exist = scopedBooks.find(b => b.barcode === barcode.trim());
+  if (exist) {
+    // 入库：复制已有图书信息，归入当前文件夹
+    const copy = { ...exist, id: uid(), addedAt: new Date().toISOString(), folder, seq: newSeq, label: newLabel };
+    delete copy._seq; delete copy._stock;
+    books.push(copy);
+    const newStock = scopedBooks.filter(b => b.barcode === barcode).length + 1;
+    addLog('in', { ...copy, _seq: newSeq, _label: newLabel, folder }, newStock);
+    saveBooks(); renderBooks(); closeScanModal();
+    const f = FOLDERS.find(x => x.id === folder);
+    showToast(`📥 已入库《${exist.title}》到「${f ? f.name : folder}」，序号 ${newSeq}，标签 ${newLabel}，库存 ${newStock} 本`);
+  } else if (fetchedBookInfo) {
+    // 新书但有联网查到的信息：归入当前文件夹
+    const newBook = {
+      id: uid(), addedAt: new Date().toISOString(), barcode, folder, seq: newSeq, label: newLabel,
+      title: fetchedBookInfo.title,
+      author: fetchedBookInfo.author || '',
+      publisher: fetchedBookInfo.publisher || '',
+      category: fetchedBookInfo.category || '',
+      price: fetchedBookInfo.price || 0,
+      location: ''
+    };
+    books.push(newBook);
+    const newStock = scopedBooks.filter(b => b.barcode === barcode).length + 1;
+    addLog('in', { ...newBook, _seq: newSeq, _label: newLabel, folder }, newStock);
+    saveBooks(); renderBooks(); closeScanModal();
+    const f = FOLDERS.find(x => x.id === folder);
+    showToast(`📥 已录入《${newBook.title}》到「${f ? f.name : folder}」，序号 ${newSeq}，标签 ${newLabel}`);
+  } else {
+    // 新书且无联网信息：打开录入表单
+    closeScanModal(); openAddModal(barcode);
+  }
+}
+function scanCheckout() {
+  const barcode = scanContext.barcode;
+  const folder = inFolder() ? currentFolder : 'general';
+  // 查找范围：文件夹视图只在该文件夹内查找；主页时全书查找
+  const scopedBooks = inFolder() ? books.filter(b => b.folder === currentFolder) : books;
+  const exist = scopedBooks.find(b => b.barcode === barcode.trim());
+  if (!exist) return showToast('该条形码在当前范围不存在，无法出库', 'error');
+  // 找到该范围内最后一个该条形码的记录并移除（后入先出）
+  let lastIdx = -1;
+  for (let i = books.length - 1; i >= 0; i--) {
+    if (books[i].barcode === barcode && books[i].folder === folder) { lastIdx = i; break; }
+  }
+  if (lastIdx < 0) return showToast('未找到该条形码记录', 'error');
+  const removed = books[lastIdx];
+  // 使用存储的固定 seq/label
+  const seq = removed.seq || 0;
+  const label = removed.label || getLabel(seq);
+  books.splice(lastIdx, 1);
+  // 同标签内 seq > 出库 seq 的所有书前移 1（不跨标签）
+  shiftLabelSeqs(folder, label, seq);
+  const newStock = scopedBooks.filter(b => b.barcode === barcode && b.id !== removed.id).length;
+  addLog('out', { ...removed, _seq: seq, _label: label, folder }, newStock);
+  saveBooks(); renderBooks(); closeScanModal(); vibrate(30);
+  const f = FOLDERS.find(x => x.id === folder);
+  showToast(`📤 已出库《${removed.title}》（${f ? f.name + '·' : ''}标签${label}，剩余 ${newStock} 本）`);
+}
+
+let _scanBuffer = '', _scanTimer = null;
+document.addEventListener('keydown', (e) => {
+  const ae = document.activeElement;
+  if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.tagName === 'SELECT')) return;
+  // 扫码弹窗打开时，按空格键一键录入
+  const scanModal = document.getElementById('scanModal');
+  if (scanModal && !scanModal.classList.contains('hidden') && e.key === ' ') {
+    e.preventDefault();
+    confirmScanOp();
+    return;
+  }
+  if (e.key === 'Enter') {
+    if (_scanBuffer && _scanBuffer.length >= 4) { processGlobalScan(_scanBuffer); e.preventDefault(); }
+    _scanBuffer = ''; clearTimeout(_scanTimer);
+  } else if (e.key.length === 1) {
+    _scanBuffer += e.key; clearTimeout(_scanTimer);
+    _scanTimer = setTimeout(() => { _scanBuffer = ''; }, 80);
+  }
+});
+function processGlobalScan(code) { document.getElementById('barcodeInput').value = code; openScanModal(code.trim()); document.getElementById('barcodeInput').value = ''; }
+
+function openCameraScanner() {
+  showModal('cameraModal');
+  document.getElementById('cameraStatus').textContent = '正在启动摄像头，请允许浏览器访问摄像头权限...';
+  document.getElementById('cameraStatus').classList.remove('hidden');
+  document.getElementById('cameraResult').classList.add('hidden');
+  currentFacingMode = 'environment'; flashOn = false;
+  setTimeout(startCamera, 300);
+}
+function startCamera() {
+  try {
+    if (html5QrCode) { try { html5QrCode.clear(); } catch(e){} html5QrCode = null; }
+    html5QrCode = new Html5Qrcode("reader", { verbose: false });
+    const isMobile = window.innerWidth < 768;
+    const w = Math.min(window.innerWidth - 40, 500);
+    const qrboxW = isMobile ? Math.min(w - 20, 400) : 320;
+    const qrboxH = qrboxW * 0.5;
+    const config = { fps: 15, qrbox: { width: qrboxW, height: qrboxH }, aspectRatio: 1.5, experimentalFeatures: { useBarCodeDetectorIfSupported: true } };
+    html5QrCode.start(
+      { facingMode: currentFacingMode }, config,
+      (decodedText) => {
+        try { html5QrCode.pause(); } catch(e){}
+        pendingCameraBarcode = decodedText;
+        document.getElementById('cameraBarcode').textContent = decodedText;
+        document.getElementById('cameraStatus').classList.add('hidden');
+        document.getElementById('cameraResult').classList.remove('hidden');
+        showToast('识别成功！'); vibrate([50, 40, 50]);
+      }, () => {}
+    ).then(() => {
+      document.getElementById('cameraStatus').textContent = '📖 将条形码对准扫描框（水平）';
+    }).catch(err => {
+      console.error(err);
+      const msg = err?.error || err?.message || String(err);
+      const isHttps = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+      document.getElementById('cameraStatus').innerHTML =
+        '<span class="text-red-400 sm:text-red-600 text-sm leading-relaxed block">❌ 无法启动摄像头：' + escapeHtml(msg) + '<br><br>' +
+        (isHttps ? '<span class="text-gray-400 sm:text-gray-500">请确认已允许摄像头权限 / 设备有摄像头</span>'
+                 : '<span class="text-amber-400 sm:text-amber-600">⚠️ 摄像头需要 HTTPS 或 localhost 环境才能启用。<br>当前使用 http 非安全访问，建议使用 localhost 访问。</span>') + '</span>';
+    });
+  } catch(e) { document.getElementById('cameraStatus').textContent = '初始化失败：' + e.message; }
+}
+function resumeScan() {
+  if (!html5QrCode) return;
+  pendingCameraBarcode = null;
+  document.getElementById('cameraResult').classList.add('hidden');
+  document.getElementById('cameraStatus').classList.remove('hidden');
+  try { html5QrCode.resume(); } catch(e) { startCamera(); }
+}
+function closeCameraScanner() {
+  if (html5QrCode) { try { html5QrCode.stop().then(() => html5QrCode.clear()).catch(()=>{}); } catch(e){} html5QrCode = null; }
+  hideModal('cameraModal'); pendingCameraBarcode = null; flashOn = false;
+}
+function useCameraResult() {
+  if (!pendingCameraBarcode) return;
+  const code = pendingCameraBarcode; closeCameraScanner();
+  setTimeout(() => openScanModal(code), 200);
+}
+async function switchFlash() {
+  if (!html5QrCode) return;
+  try {
+    const settings = html5QrCode.getRunningTrackCameraCapabilities();
+    if (settings && typeof settings.torch !== 'undefined') {
+      flashOn = !flashOn;
+      await html5QrCode.applyVideoConstraints({ advanced: [{ torch: flashOn }] });
+      document.getElementById('flashBtn').innerHTML = flashOn
+        ? '<svg class="w-5 h-5 text-yellow-300" fill="currentColor" viewBox="0 0 24 24"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>已开'
+        : '<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>手电筒';
+    } else { showToast('当前设备不支持手电筒', 'error'); }
+  } catch(e) { showToast('无法控制手电筒', 'error'); }
+}
+async function switchCamera() {
+  if (!html5QrCode) return;
+  currentFacingMode = currentFacingMode === 'environment' ? 'user' : 'environment';
+  try { await html5QrCode.stop(); } catch(e){}
+  startCamera();
+}
+
+function importExcel(evt) {
+  const file = evt.target.files[0]; if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      let added = 0, skipped = 0;
+      // 导入时归入当前所在文件夹（主页时默认"大类"）
+      const folder = inFolder() ? currentFolder : 'general';
+      // 每个文件夹内当前最大 seq，用于增量分配
+      const seqMap = {};
+      FOLDERS.forEach(f => {
+        const scoped = books.filter(b => (b.folder || 'general') === f.id);
+        let max = 0;
+        scoped.forEach(b => { if (b.seq && b.seq > max) max = b.seq; });
+        seqMap[f.id] = max;
+      });
+      rows.forEach(r => {
+        const barcode = String(r['条形码'] || r['barcode'] || r['Barcode'] || '').trim();
+        const title = String(r['书名'] || r['title'] || r['Title'] || '').trim();
+        if (!barcode || !title) { skipped++; return; }
+        const qty = parseInt(r['数量'] || r['quantity'] || 1) || 1;
+        // 如果Excel里有"文件夹"列，按其指定；否则用当前文件夹
+        const folderVal = String(r['文件夹'] || r['folder'] || '').trim();
+        const rowFolder = folderVal && FOLDERS.find(f => f.name === folderVal || f.id === folderVal)
+          ? (FOLDERS.find(f => f.name === folderVal || f.id === folderVal).id)
+          : folder;
+        const obj = {
+          barcode, title,
+          author: String(r['作者'] || r['author'] || r['Author'] || '').trim(),
+          publisher: String(r['出版社'] || r['publisher'] || r['Publisher'] || '').trim(),
+          category: String(r['分类'] || r['category'] || r['Category'] || '').trim(),
+          price: parseFloat(r['单价'] || r['price'] || r['Price'] || 0) || 0,
+          location: String(r['位置'] || r['书架'] || r['location'] || '').trim(),
+          folder: rowFolder
+        };
+        // 按数量重复录入，每本一条记录，分配连续 seq
+        for (let i = 0; i < qty; i++) {
+          seqMap[rowFolder] = (seqMap[rowFolder] || 0) + 1;
+          const newSeq = seqMap[rowFolder];
+          books.push({ id: uid(), addedAt: new Date().toISOString(), seq: newSeq, label: getLabel(newSeq), ...obj });
+          added++;
+        }
+      });
+      saveBooks(); renderBooks();
+      const f = FOLDERS.find(x => x.id === folder);
+      showToast(`导入完成：新增${added}本到「${f ? f.name : folder}」，跳过${skipped}行`);
+    } catch (err) { showToast('导入失败：' + err.message, 'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+  evt.target.value = '';
+}
+
+function exportExcel() {
+  if (books.length === 0) return showToast('暂无数据可导出', 'error');
+  // 文件夹视图下只导出当前文件夹，主页导出全部（保持原数组顺序）
+  const scopedBooks = inFolder() ? books.filter(b => b.folder === currentFolder) : books;
+  if (scopedBooks.length === 0) return showToast('当前范围无数据可导出', 'error');
+  const data = scopedBooks.map((b) => {
+    const f = FOLDERS.find(x => x.id === b.folder) || FOLDERS[3];
+    const seq = b.seq || 0;
+    const label = b.label || getLabel(seq);
+    return {
+      '序号': seq, '标签': label,
+      '文件夹': f.name, '条形码': b.barcode, '书名': b.title, '作者': b.author || '',
+      '出版社': b.publisher || '', '分类': b.category || '',
+      '单价': b.price || 0, '位置': b.location || ''
+    };
+  });
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [{wch:6},{wch:6},{wch:12},{wch:16},{wch:28},{wch:14},{wch:18},{wch:12},{wch:10},{wch:16}];
+  const wb = XLSX.utils.book_new();
+  const f = inFolder() ? currentFolderObj() : null;
+  XLSX.utils.book_append_sheet(wb, ws, f ? f.name : '图书清单');
+  const scope = f ? f.name + '_' : '';
+  const fileName = `${scope}图书清单_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+  showToast(`已导出 ${scopedBooks.length} 本图书${f ? '（'+f.name+'）' : ''}`);
+}
+
+function downloadTemplate() {
+  const data = [
+    {'条形码':'9787111213826','书名':'示例图书','作者':'张三','出版社':'示例出版社','分类':'计算机','单价':59.00,'位置':'A区-1层','文件夹':'大类','数量':1}
+  ];
+  const ws = XLSX.utils.json_to_sheet(data);
+  ws['!cols'] = [{wch:16},{wch:28},{wch:14},{wch:18},{wch:12},{wch:10},{wch:16},{wch:10},{wch:8}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '图书清单');
+  XLSX.writeFile(wb, '图书导入模板.xlsx');
+  showToast('模板已下载');
+}
+
+loadBooks();
+loadLogs();
+renderBooks();
+updateAutoScanBtn();
+// 页面加载后自动检查是否需要每周备份
+setTimeout(checkAutoBackup, 2000);
+</script>
+</body>
+</html>
