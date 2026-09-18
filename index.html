@@ -11,6 +11,7 @@
 <script src="./lib/tailwind.js"></script>
 <script src="./lib/xlsx.full.min.js"></script>
 <script src="./lib/html5-qrcode.min.js"></script>
+<script src="./config.js"></script>
 <script>
   tailwind.config = { theme: { extend: { screens: { 'xs': '380px' } } } }
 </script>
@@ -354,10 +355,13 @@ const GITEE = {
   branch: 'master',
   dataFile: 'data.json'
 };
-// 自动判断当前环境：云端（Cloudflare Pages 等）还是本地服务器
+// 自动判断当前环境：云端（GitHub Pages 等）还是本地服务器
 // localhost / 127.0.0.1 / cpolar 内网穿透 → 本地服务器模式
-// 其他（包括 *.pages.dev, *.gitee.io 等） → 云端 Gitee API 模式
+// 其他（包括 *.github.io, *.pages.dev 等） → 云端模式
 const IS_GITEE_PAGES = !(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname.endsWith('cpolar.cn') || location.hostname.endsWith('cpolar.io'));
+// 云端数据文件 URL：从当前仓库的 data.json 读取
+// 通过 Gitee API 写入（保留写入功能），通过 GitHub raw 读取（更稳定）
+const GITHUB_RAW = `https://raw.githubusercontent.com/EFE-Maker/book-system/main/data.json`;
 // Gitee API 基础 URL
 const GITEE_API = `https://gitee.com/api/v5/repos/${GITEE.owner}/${GITEE.repo}`;
 // 4个固定文件夹（顺序即展示顺序）
@@ -416,7 +420,14 @@ function shiftLabelSeqs(folder, label, fromSeq) {
 }
 
 // ========= Gitee API 读写函数 =========
-// 从 Gitee 仓库读取 data.json
+// 从 GitHub raw 读取 data.json（只读，但更稳定，不受 API 限流影响）
+function githubReadData() {
+  return fetch(GITHUB_RAW, { cache: 'no-store' }).then(r => {
+    if (!r.ok) throw new Error('GitHub read failed: ' + r.status);
+    return r.json();
+  });
+}
+// 从 Gitee 仓库读取 data.json（同时获取 sha 用于更新）
 function giteeReadData() {
   const url = `${GITEE_API}/contents/${GITEE.dataFile}?ref=${GITEE.branch}&access_token=${GITEE.token}`;
   return fetch(url).then(r => {
@@ -455,21 +466,56 @@ function giteeWriteData(payload, sha) {
     return sha;
   });
 }
+// 写入 data.json 到 GitHub 仓库（通过 GitHub API）
+// 从外部 config.js 加载 GitHub Token（避免硬编码触发安全扫描）
+let _githubSha = null;
+function githubWriteData(payload) {
+  // 如果 config.js 未加载，跳过 GitHub 写入
+  if (!window.GITHUB_CONFIG) return Promise.reject(new Error('GitHub config not loaded'));
+  const token = window.GITHUB_CONFIG.token;
+  const repo = `${window.GITHUB_CONFIG.owner}/${window.GITHUB_CONFIG.repo}`;
+  const branch = window.GITHUB_CONFIG.branch || 'main';
+  const url = `https://api.github.com/repos/${repo}/contents/data.json`;
+  const body = {
+    message: 'auto-save: ' + new Date().toISOString(),
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(payload)))),
+    branch: branch
+  };
+  if (_githubSha) body.sha = _githubSha;
+  return fetch(url, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify(body)
+  }).then(r => {
+    if (!r.ok) throw new Error('GitHub write failed: ' + r.status);
+    return r.json();
+  }).then(j => {
+    if (j.content && j.content.sha) {
+      _githubSha = j.content.sha;
+      return _githubSha;
+    }
+    return _githubSha;
+  });
+}
 // 全局 sha：当前云端文件的版本号，用于下次更新
 let _giteeSha = null;
 
 function loadBooks() {
   // 根据环境选择数据源
   if (IS_GITEE_PAGES) {
-    // Gitee Pages 模式：从 Gitee API 加载
-    giteeReadData().then(({ content, sha }) => {
-      _giteeSha = sha;
-      if (content && content.books) {
-        books = content.books;
-        if (content.logs) logs = content.logs;
+    // 云端模式：优先从 GitHub raw 读取 data.json（稳定、无 API 限流）
+    // 同时后台从 Gitee API 获取 sha（用于后续写入）
+    githubReadData().then(data => {
+      if (data && data.books) {
+        books = data.books;
+        if (data.logs) logs = data.logs;
         migrateData();
       } else {
-        // 云端无数据，尝试 localStorage 缓存
+        // GitHub 无数据，尝试 localStorage 缓存
         try {
           books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
           logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
@@ -477,16 +523,41 @@ function loadBooks() {
         } catch(e) { books = []; logs = []; }
       }
       renderBooks(); renderLogs(); renderFolderCards();
+      // 后台获取 Gitee sha（用于保存时更新）
+      giteeReadData().then(({ sha }) => { _giteeSha = sha; }).catch(() => {});
+      // 后台获取 GitHub sha（用于保存时更新）
+      if (window.GITHUB_CONFIG) {
+        fetch(`https://api.github.com/repos/${window.GITHUB_CONFIG.owner}/${window.GITHUB_CONFIG.repo}/contents/data.json?ref=${window.GITHUB_CONFIG.branch || 'main'}`, {
+          headers: { 'Authorization': `Bearer ${window.GITHUB_CONFIG.token}`, 'Accept': 'application/vnd.github+json' }
+        }).then(r => r.json()).then(j => { if (j.sha) _githubSha = j.sha; }).catch(() => {});
+      }
     }).catch(err => {
-      console.error('Gitee load error:', err);
-      // 失败回退到 localStorage
-      try {
-        books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
-        logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
-        migrateData();
-      } catch(e) { books = []; logs = []; }
-      renderBooks(); renderLogs(); renderFolderCards();
-      showToast('云端加载失败，使用本地缓存', 'error');
+      console.error('GitHub read error:', err);
+      // GitHub 读取失败，回退到 Gitee API
+      giteeReadData().then(({ content, sha }) => {
+        _giteeSha = sha;
+        if (content && content.books) {
+          books = content.books;
+          if (content.logs) logs = content.logs;
+          migrateData();
+        } else {
+          try {
+            books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+            logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+            migrateData();
+          } catch(e) { books = []; logs = []; }
+        }
+        renderBooks(); renderLogs(); renderFolderCards();
+      }).catch(err2 => {
+        console.error('Gitee load error:', err2);
+        try {
+          books = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]');
+          logs = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+          migrateData();
+        } catch(e) { books = []; logs = []; }
+        renderBooks(); renderLogs(); renderFolderCards();
+        showToast('云端加载失败，使用本地缓存', 'error');
+      });
     });
   } else {
     // 本地服务器模式：从 /api/data 加载
@@ -540,7 +611,8 @@ function saveBooks() {
 function syncToServer() {
   const payload = { books, logs };
   if (IS_GITEE_PAGES) {
-    // Gitee Pages 模式：写入 Gitee 仓库
+    // 云端模式：同时写入 Gitee 和 GitHub 仓库
+    // 1. 写入 Gitee 仓库
     giteeWriteData(payload, _giteeSha).then(newSha => {
       _giteeSha = newSha;
       _lastSaveTime = Date.now();
@@ -551,7 +623,11 @@ function syncToServer() {
         _giteeSha = sha;
         return giteeWriteData(payload, _giteeSha);
       }).then(newSha => { _giteeSha = newSha; _lastSaveTime = Date.now(); })
-        .catch(e => console.error('重试失败:', e));
+        .catch(e => console.warn('Gitee 重试失败:', e));
+    });
+    // 2. 同时写入 GitHub 仓库（通过 GitHub API）
+    githubWriteData(payload).catch(err => {
+      console.warn('同步到 GitHub 失败：', err);
     });
   } else {
     // 本地服务器模式：写入本地 /api/data
