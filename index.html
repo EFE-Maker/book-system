@@ -359,9 +359,13 @@ const GITEE = {
 // localhost / 127.0.0.1 / cpolar 内网穿透 → 本地服务器模式
 // 其他（包括 *.github.io, *.pages.dev 等） → 云端模式
 const IS_GITEE_PAGES = !(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.hostname.endsWith('cpolar.cn') || location.hostname.endsWith('cpolar.io'));
-// 云端数据文件 URL：从当前仓库的 data.json 读取
-// 通过 Gitee API 写入（保留写入功能），通过 GitHub raw 读取（更稳定）
-const GITHUB_RAW = `https://raw.githubusercontent.com/EFE-Maker/book-system/main/data.json`;
+// 云端数据文件 URL：多个 CDN 源，国内优先
+// jsdelivr CDN（国内可访问）→ GitHub raw（备用）→ Gitee API（最后备用）
+const DATA_URLS = [
+  `https://cdn.jsdelivr.net/gh/EFE-Maker/book-system@main/data.json`,
+  `https://fastly.jsdelivr.net/gh/EFE-Maker/book-system@main/data.json`,
+  `https://raw.githubusercontent.com/EFE-Maker/book-system/main/data.json`
+];
 // Gitee API 基础 URL
 const GITEE_API = `https://gitee.com/api/v5/repos/${GITEE.owner}/${GITEE.repo}`;
 // 4个固定文件夹（顺序即展示顺序）
@@ -422,10 +426,15 @@ function shiftLabelSeqs(folder, label, fromSeq) {
 // ========= Gitee API 读写函数 =========
 // 从 GitHub raw 读取 data.json（只读，但更稳定，不受 API 限流影响）
 function githubReadData() {
-  return fetch(GITHUB_RAW, { cache: 'no-store' }).then(r => {
-    if (!r.ok) throw new Error('GitHub read failed: ' + r.status);
+  // 依次尝试多个 CDN 源，第一个成功就返回
+  const tryFetch = (url) => fetch(url, { cache: 'no-store' }).then(r => {
+    if (!r.ok) throw new Error('fetch failed: ' + r.status);
     return r.json();
   });
+  return DATA_URLS.reduce(
+    (p, url) => p.catch(() => tryFetch(url)),
+    Promise.reject(new Error('start'))
+  );
 }
 // 从 Gitee 仓库读取 data.json（同时获取 sha 用于更新）
 function giteeReadData() {
